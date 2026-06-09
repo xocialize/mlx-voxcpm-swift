@@ -26,6 +26,12 @@ public enum ModelLoader {
         public let model: VoxCPMModel
         public let tokenizer: any Tokenizer
         public let config: ModelArgs
+        /// Model parameter keys that **no** weight in the loaded file filled — these remain at
+        /// random init. A non-empty list means the weights don't match this architecture (e.g. an
+        /// incompatible HuggingFace revision or a differently-converted checkpoint), and inference
+        /// will produce garbage audio with no other symptom. Callers should treat non-empty as a
+        /// hard error. Empty == every parameter was loaded.
+        public let missingKeys: [String]
     }
 
     /// Load the VoxCPM2 model and tokenizer from a local directory.
@@ -53,6 +59,11 @@ public enum ModelLoader {
             .filter { modelKeySet.contains($0.key) }
             .mapValues { $0.asType(.float32) }
 
+        // Parity check: any model parameter the weights didn't fill stays at random init.
+        // `update(verify: .noUnusedKeys)` only catches the opposite (extra weights), so surface
+        // the unfilled keys for the caller to reject. (Empty == fully loaded.)
+        let missingKeys = modelKeySet.subtracting(filtered.keys).sorted()
+
         // 6. Unflatten and apply weights
         let nested = ModuleParameters.unflattened(filtered)
         try model.update(parameters: nested, verify: [.noUnusedKeys])
@@ -63,7 +74,7 @@ public enum ModelLoader {
             strict: false
         )
 
-        return LoadResult(model: model, tokenizer: tokenizer, config: config)
+        return LoadResult(model: model, tokenizer: tokenizer, config: config, missingKeys: missingKeys)
     }
 
     /// Load config only (no weights, no GPU).
